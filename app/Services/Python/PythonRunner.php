@@ -4,22 +4,80 @@ declare(strict_types=1);
 
 namespace App\Services\Python;
 
+use App\Contracts\Python\PythonRunnerInterface;
 use App\Exceptions\Python\PythonExecutionException;
 use App\Exceptions\Python\PythonNotFoundException;
+use App\Exceptions\Python\PythonSecurityException;
 use App\Exceptions\Python\PythonTimeoutException;
 use Illuminate\Process\Exceptions\ProcessTimedOutException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
+use JsonException;
 
-class PythonRunner
+class PythonRunner implements PythonRunnerInterface
 {
     public function __construct(
-        protected PythonPathResolver $pathResolver
+        protected PythonPathResolver $pathResolver,
+        protected PythonScriptSecurity $scriptSecurity
     ) {
     }
 
     /**
-     * Run Python with the given arguments array.
+     * Run an allowlisted Python script with structured payload and arguments.
+     *
+     * @param  array<string, mixed>  $payload
+     * @param  array<int, string>  $args
+     *
+     * @throws PythonSecurityException
+     * @throws PythonNotFoundException
+     * @throws PythonTimeoutException
+     * @throws PythonExecutionException
+     */
+    public function run(
+        string $script,
+        array $payload = [],
+        array $args = [],
+        ?int $timeout = null
+    ): PythonResult {
+        $safePath = $this->scriptSecurity->resolveSafeScriptPath($script);
+
+        $payloadArgs = [];
+        if ($payload !== []) {
+            try {
+                $json = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                $payloadArgs[] = '--payload-base64='.base64_encode($json);
+            } catch (JsonException $e) {
+                Log::warning("Failed to encode Python payload: {$e->getMessage()}", ['payload' => $payload]);
+            }
+        }
+
+        $libPath = (string) config('python.lib_path', base_path('python/lib'));
+        $existingPythonPath = (string) getenv('PYTHONPATH');
+        $pythonPath = $existingPythonPath !== '' ? $libPath.PATH_SEPARATOR.$existingPythonPath : $libPath;
+
+        $env = ['PYTHONPATH' => $pythonPath];
+
+        return $this->raw(
+            arguments: [$safePath, ...$payloadArgs, ...$args],
+            timeout: $timeout,
+            env: $env
+        );
+    }
+
+    /**
+     * Run inline Python code string with arguments.
+     *
+     * @param  array<int, string>  $args
+     *
+     * @throws PythonException
+     */
+    public function inline(string $code, array $args = [], ?int $timeout = null): PythonResult
+    {
+        return $this->raw(['-c', $code, ...$args], $timeout);
+    }
+
+    /**
+     * Execute raw arguments directly via the resolved Python binary.
      *
      * @param  array<int, string>  $arguments
      * @param  array<string, string>  $env
@@ -28,9 +86,9 @@ class PythonRunner
      * @throws PythonTimeoutException
      * @throws PythonExecutionException
      */
-    public function run(
+    public function raw(
         array $arguments,
-        int $timeout = 60,
+        ?int $timeout = null,
         ?string $cwd = null,
         array $env = []
     ): PythonResult {
@@ -44,16 +102,17 @@ class PythonRunner
             throw $exception;
         }
 
+        $effectiveTimeout = $timeout ?? (int) config('python.timeout', 60);
         $fullCommand = [$pythonBinary, ...$arguments];
 
-        $process = Process::timeout($timeout)
+        $process = Process::timeout($effectiveTimeout)
             ->path($cwd ?? base_path())
             ->env($env);
 
         try {
             $result = $process->run($fullCommand);
         } catch (ProcessTimedOutException $e) {
-            $exception = PythonTimeoutException::fromTimeout($fullCommand, $timeout, $e);
+            $exception = PythonTimeoutException::fromTimeout($fullCommand, $effectiveTimeout, $e);
 
             Log::error($exception->getMessage(), $exception->context());
 
@@ -68,7 +127,7 @@ class PythonRunner
                 stdout: $result->output()
             );
 
-            // Logging at error level triggers Boost's LastError listener and log watchers
+            // Logging at error level activates Boost's LastError listener and log watchers
             Log::error($exception->getMessage(), $exception->context());
 
             throw $exception;
@@ -83,26 +142,22 @@ class PythonRunner
     }
 
     /**
-     * Run inline Python code string with arguments.
+     * Alias for backward compatibility.
      *
      * @param  array<int, string>  $args
-     *
-     * @throws PythonException
      */
     public function runInline(string $code, array $args = [], int $timeout = 60): PythonResult
     {
-        return $this->run(['-c', $code, ...$args], $timeout);
+        return $this->inline($code, $args, $timeout);
     }
 
     /**
-     * Run a Python script file with arguments.
+     * Alias for backward compatibility.
      *
      * @param  array<int, string>  $args
-     *
-     * @throws PythonException
      */
     public function runScript(string $scriptPath, array $args = [], int $timeout = 60): PythonResult
     {
-        return $this->run([$scriptPath, ...$args], $timeout);
+        return $this->raw([$scriptPath, ...$args], $timeout);
     }
 }
