@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Mcp\Tools;
 
+use App\Services\Python\PythonPathResolver;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
 use Illuminate\Support\Facades\Process;
@@ -19,6 +20,11 @@ class PythonEnvironment extends Tool
      * The tool's description.
      */
     protected string $description = 'Inspect the Python runtime environment, interpreter path, version, and virtual environment status.';
+
+    public function __construct(
+        protected PythonPathResolver $pathResolver
+    ) {
+    }
 
     /**
      * Get the tool's input schema.
@@ -40,39 +46,52 @@ class PythonEnvironment extends Tool
     {
         $checkPackages = (bool) $request->get('check_packages', false);
 
-        $versionResult = Process::run(['python3', '--version']);
-        $installed = $versionResult->successful();
-        $version = trim($versionResult->output());
-
-        $whichResult = Process::run(['which', 'python3']);
-        $executable = trim($whichResult->output());
-
-        $venvPath = base_path('.venv');
-        $venvDetected = is_dir($venvPath);
+        $installed = $this->pathResolver->isAvailable();
+        $version = $this->pathResolver->version();
+        $executable = $this->pathResolver->pythonBinary();
+        $hasVenv = $this->pathResolver->hasVirtualEnvironment();
+        $venvPath = $this->pathResolver->virtualEnvironmentPath();
 
         $packages = [];
-        if ($checkPackages && $installed) {
-            $pipCmd = $venvDetected && file_exists($venvPath.'/bin/pip')
-                ? [$venvPath.'/bin/pip', 'list', '--format=json']
-                : ['python3', '-m', 'pip', 'list', '--format=json'];
 
-            $pipResult = Process::run($pipCmd);
-            if ($pipResult->successful()) {
-                $packages = json_decode($pipResult->output(), true) ?? [];
-            }
+        if ($checkPackages && $installed) {
+            $packages = $this->resolveInstalledPackages();
         }
 
         return Response::json([
             'installed' => $installed,
-            'version' => $version !== '' ? $version : null,
-            'executable' => $executable !== '' ? $executable : null,
+            'version' => $version,
+            'executable' => $executable,
             'virtual_environment' => [
-                'detected' => $venvDetected,
-                'path' => $venvDetected ? $venvPath : null,
+                'detected' => $hasVenv,
+                'path' => $hasVenv ? $venvPath : null,
             ],
             'packages_count' => count($packages),
             'packages' => $packages,
         ]);
     }
-}
 
+    /**
+     * Retrieve list of installed packages.
+     *
+     * @return array<int, array{name: string, version: string}>
+     */
+    protected function resolveInstalledPackages(): array
+    {
+        $pip = $this->pathResolver->pipBinary();
+
+        $command = $pip !== null
+            ? [$pip, 'list', '--format=json']
+            : [$this->pathResolver->pythonBinary(), '-m', 'pip', 'list', '--format=json'];
+
+        $result = Process::run($command);
+
+        if (! $result->successful()) {
+            return [];
+        }
+
+        $decoded = json_decode($result->output(), true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+}

@@ -36,5 +36,17 @@ class PythonEnvironmentToolTest extends TestCase
         $this->assertArrayHasKey('executable', $data);
         $this->assertArrayHasKey('virtual_environment', $data);
     }
-}
 
+    public function test_python_environment_tool_reflects_configured_executable_path(): void
+    {
+        config(['python.executable_paths.python' => '/opt/custom/python3']);
+
+        /** @var PythonEnvironment $tool */
+        $tool = app(PythonEnvironment::class);
+
+        $response = $tool->handle(new Request(['check_packages' => false]));
+        $data = json_decode((string) $response->content(), true);
+
+        $this->assertSame('/opt/custom/python3', $data['executable']);
+    }
+}
