@@ -14,7 +14,7 @@
 ## التثبيت
 
 ```bash
-composer require larapython/engine
+composer require entity/larapython
 ```
 
 نشر الإعدادات والأصول:
