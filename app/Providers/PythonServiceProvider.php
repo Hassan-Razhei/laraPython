@@ -7,10 +7,12 @@ namespace App\Providers;
 use App\Console\Commands\Python\MakePythonScriptCommand;
 use App\Console\Commands\Python\PythonHealthCommand;
 use App\Console\Commands\Python\PythonInstallCommand;
+use App\Console\Commands\Python\PythonServeCommand;
 use App\Contracts\Python\PythonRunnerInterface;
 use App\Services\Python\PythonPathResolver;
 use App\Services\Python\PythonRunner;
 use App\Services\Python\PythonScriptSecurity;
+use App\Services\Python\Services\PythonServiceManager;
 use Illuminate\Support\ServiceProvider;
 
 class PythonServiceProvider extends ServiceProvider
@@ -24,11 +26,13 @@ class PythonServiceProvider extends ServiceProvider
 
         $this->app->singleton(PythonPathResolver::class);
         $this->app->singleton(PythonScriptSecurity::class);
+        $this->app->singleton(PythonServiceManager::class);
 
         $this->app->singleton(PythonRunnerInterface::class, function ($app): PythonRunner {
             return new PythonRunner(
                 pathResolver: $app->make(PythonPathResolver::class),
                 scriptSecurity: $app->make(PythonScriptSecurity::class),
+                serviceManager: $app->make(PythonServiceManager::class),
             );
         });
 
@@ -46,6 +50,7 @@ class PythonServiceProvider extends ServiceProvider
                 PythonHealthCommand::class,
                 PythonInstallCommand::class,
                 MakePythonScriptCommand::class,
+                PythonServeCommand::class,
             ]);
         }
     }

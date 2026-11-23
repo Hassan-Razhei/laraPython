@@ -10,6 +10,8 @@ use App\Exceptions\Python\PythonNotFoundException;
 use App\Exceptions\Python\PythonSecurityException;
 use App\Exceptions\Python\PythonTimeoutException;
 use App\Jobs\ExecutePythonScriptJob;
+use App\Services\Python\Services\PythonServiceClient;
+use App\Services\Python\Services\PythonServiceManager;
 use Illuminate\Foundation\Bus\PendingDispatch;
 use Illuminate\Process\Exceptions\ProcessTimedOutException;
 use Illuminate\Support\Facades\Log;
@@ -20,7 +22,8 @@ class PythonRunner implements PythonRunnerInterface
 {
     public function __construct(
         protected PythonPathResolver $pathResolver,
-        protected PythonScriptSecurity $scriptSecurity
+        protected PythonScriptSecurity $scriptSecurity,
+        protected ?PythonServiceManager $serviceManager = null
     ) {
     }
 
@@ -161,6 +164,30 @@ class PythonRunner implements PythonRunnerInterface
             args: $args,
             timeout: $timeout ?? (int) config('python.timeout', 60)
         );
+    }
+
+    /**
+     * Get an HTTP client instance for the specified Python continuous microservice.
+     */
+    public function service(string $name = 'ai'): PythonServiceClient
+    {
+        return $this->getServiceManager()->service($name);
+    }
+
+    /**
+     * Get the service manager instance.
+     */
+    public function serviceManager(): PythonServiceManager
+    {
+        return $this->getServiceManager();
+    }
+
+    /**
+     * Resolve the Python service manager instance.
+     */
+    protected function getServiceManager(): PythonServiceManager
+    {
+        return $this->serviceManager ??= app(PythonServiceManager::class);
     }
 
     /**

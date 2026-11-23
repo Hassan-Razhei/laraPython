@@ -56,4 +56,28 @@ return [
 
     'timeout' => (int) env('PYTHON_TIMEOUT', 60),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Python Continuous Microservices
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for persistent Python services (e.g., FastAPI, Flask).
+    | Allows Laravel to manage their lifecycle and communicate with them
+    | via low-latency HTTP.
+    |
+    */
+
+    'services' => [
+        'ai' => [
+            'name' => 'AI Microservice',
+            'host' => env('PYTHON_AI_SERVICE_HOST', '127.0.0.1'),
+            'port' => (int) env('PYTHON_AI_SERVICE_PORT', 8001),
+            'script' => env('PYTHON_AI_SERVICE_SCRIPT', 'python/services/ai/main.py'),
+            'health_path' => env('PYTHON_AI_SERVICE_HEALTH_PATH', '/health'),
+            'timeout' => (int) env('PYTHON_AI_SERVICE_TIMEOUT', 5),
+            'connect_timeout' => (int) env('PYTHON_AI_SERVICE_CONNECT_TIMEOUT', 2),
+            'pid_file' => storage_path('framework/python_ai.pid'),
+        ],
+    ],
+
 ];

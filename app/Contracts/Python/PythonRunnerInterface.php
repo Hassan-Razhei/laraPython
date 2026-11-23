@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Contracts\Python;
 
 use App\Services\Python\PythonResult;
+use App\Services\Python\Services\PythonServiceClient;
 use Illuminate\Foundation\Bus\PendingDispatch;
 
 interface PythonRunnerInterface
@@ -39,4 +40,9 @@ interface PythonRunnerInterface
      * @param  array<int, string>  $args
      */
     public function queue(string $script, array $payload = [], array $args = [], ?int $timeout = null): PendingDispatch;
+
+    /**
+     * Get an HTTP client instance for the specified Python continuous microservice.
+     */
+    public function service(string $name = 'ai'): PythonServiceClient;
 }
