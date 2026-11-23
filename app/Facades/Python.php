@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static PythonResult run(string $script, array $payload = [], array $args = [], ?int $timeout = null)
  * @method static PythonResult inline(string $code, array $args = [], ?int $timeout = null)
  * @method static PythonResult raw(array $arguments, ?int $timeout = null, ?string $cwd = null, array $env = [])
+ * @method static \Illuminate\Foundation\Bus\PendingDispatch queue(string $script, array $payload = [], array $args = [], ?int $timeout = null)
  *
  * @see \App\Services\Python\PythonRunner
  */

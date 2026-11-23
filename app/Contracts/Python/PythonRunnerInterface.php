@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Contracts\Python;
 
 use App\Services\Python\PythonResult;
+use Illuminate\Foundation\Bus\PendingDispatch;
 
 interface PythonRunnerInterface
 {
@@ -30,5 +31,12 @@ interface PythonRunnerInterface
      * @param  array<string, string>  $env
      */
     public function raw(array $arguments, ?int $timeout = null, ?string $cwd = null, array $env = []): PythonResult;
-}
 
+    /**
+     * Dispatch a Python script execution to the background queue.
+     *
+     * @param  array<string, mixed>  $payload
+     * @param  array<int, string>  $args
+     */
+    public function queue(string $script, array $payload = [], array $args = [], ?int $timeout = null): PendingDispatch;
+}

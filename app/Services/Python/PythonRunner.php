@@ -9,6 +9,8 @@ use App\Exceptions\Python\PythonExecutionException;
 use App\Exceptions\Python\PythonNotFoundException;
 use App\Exceptions\Python\PythonSecurityException;
 use App\Exceptions\Python\PythonTimeoutException;
+use App\Jobs\ExecutePythonScriptJob;
+use Illuminate\Foundation\Bus\PendingDispatch;
 use Illuminate\Process\Exceptions\ProcessTimedOutException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
@@ -138,6 +140,26 @@ class PythonRunner implements PythonRunnerInterface
             stdout: $result->output(),
             stderr: $result->errorOutput(),
             command: $fullCommand
+        );
+    }
+
+    /**
+     * Dispatch a Python script execution to the background queue.
+     *
+     * @param  array<string, mixed>  $payload
+     * @param  array<int, string>  $args
+     */
+    public function queue(
+        string $script,
+        array $payload = [],
+        array $args = [],
+        ?int $timeout = null
+    ): PendingDispatch {
+        return ExecutePythonScriptJob::dispatch(
+            script: $script,
+            payload: $payload,
+            args: $args,
+            timeout: $timeout ?? (int) config('python.timeout', 60)
         );
     }
 
