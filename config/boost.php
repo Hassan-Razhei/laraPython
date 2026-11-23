@@ -30,7 +30,7 @@ return [
 
     'rules' => [
         'enabled' => env('BOOST_RULES_ENABLED', true),
-        'scoped_guidelines' => env('BOOST_RULES_SCOPED_GUIDELINES', false),
+        'scoped_guidelines' => env('BOOST_RULES_SCOPED_GUIDELINES', true),
     ],
 
     /*
