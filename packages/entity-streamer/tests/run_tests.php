@@ -26,7 +26,11 @@ use EntityStreamer\Core\BinaryStreamer;
 use EntityStreamer\Core\ByteRange;
 use EntityStreamer\Core\RangeHeaderParser;
 use EntityStreamer\Exceptions\InvalidByteRangeException;
+use EntityStreamer\Exceptions\MediaFileNotFoundException;
 use EntityStreamer\Exceptions\StreamResourceException;
+use EntityStreamer\Storage\StreamableFile;
+use EntityStreamer\Storage\StreamableStorageAdapter;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Symfony\Component\HttpFoundation\Request;
 
 $passed = 0;
@@ -455,6 +459,132 @@ it('BinaryStreamer: memory safety test (zero-ballooning on multi-chunk stream)',
 if (file_exists($tmpFile)) {
     unlink($tmpFile);
 }
+
+// --- Level 3: Storage Driver Agnosticism & Flysystem Tests ---
+echo "\n=======================================================\n";
+echo " 🚀 Running Level 3 Tests for entity-streamer (Storage Adapter)\n";
+echo "=======================================================\n\n";
+
+$tempStorageDir = sys_get_temp_dir() . '/streamer_l3_' . uniqid();
+mkdir($tempStorageDir, 0777, true);
+$testFilePath = $tempStorageDir . '/audio.mp3';
+file_put_contents($testFilePath, 'sample audio content');
+
+$subDirPath = $tempStorageDir . '/videos';
+mkdir($subDirPath, 0777, true);
+$subFilePath = $subDirPath . '/intro.mp4';
+file_put_contents($subFilePath, 'sample video content');
+
+it('StorageAdapter: resolves local direct file', function () use ($testFilePath) {
+    $adapter = new StreamableStorageAdapter();
+    $file = $adapter->resolve($testFilePath);
+
+    assertTrue($file instanceof StreamableFile);
+    assertEqual($testFilePath, $file->path);
+    assertEqual(strlen('sample audio content'), $file->size);
+    assertTrue($file->isLocal());
+
+    $stream = $file->openStream();
+    assertTrue(is_resource($stream));
+    assertEqual('sample audio content', stream_get_contents($stream));
+    fclose($stream);
+});
+
+it('StorageAdapter: resolves via fallback directories on local disk', function () use ($tempStorageDir) {
+    $adapter = (new StreamableStorageAdapter())
+        ->withFallbackPrefixes([$tempStorageDir . '/videos']);
+
+    $file = $adapter->resolve('intro.mp4');
+
+    assertEqual($tempStorageDir . '/videos/intro.mp4', $file->path);
+    assertEqual(strlen('sample video content'), $file->size);
+
+    $stream = $file->openStream();
+    assertEqual('sample video content', stream_get_contents($stream));
+    fclose($stream);
+});
+
+it('StorageAdapter: resolves via custom Filesystem interface (simulated cloud disk)', function () {
+    // Custom mock class implementing Filesystem
+    $simulatedCloudFs = new class implements Filesystem {
+        public function exists($path) { return $path === 'videos/nature.mp4'; }
+        public function get($path) { return 'simulated s3 content'; }
+        public function readStream($path) {
+            $h = fopen('php://memory', 'w+b');
+            fwrite($h, 'simulated s3 video stream');
+            rewind($h);
+            return $h;
+        }
+        public function put($path, $contents, $options = []) { return true; }
+        public function writeStream($path, $resource, array $options = []) { return true; }
+        public function getVisibility($path) { return 'public'; }
+        public function setVisibility($path, $visibility) { return true; }
+        public function prepend($path, $data) { return true; }
+        public function append($path, $data) { return true; }
+        public function delete($paths) { return true; }
+        public function copy($from, $to) { return true; }
+        public function move($from, $to) { return true; }
+        public function size($path) { return 1048576; }
+        public function lastModified($path) { return 1700000000; }
+        public function files($directory = null, $recursive = false) { return []; }
+        public function allFiles($directory = null) { return []; }
+        public function directories($directory = null, $recursive = false) { return []; }
+        public function allDirectories($directory = null) { return []; }
+        public function makeDirectory($path) { return true; }
+        public function deleteDirectory($directory) { return true; }
+        public function mimeType($path) { return 'video/mp4'; }
+        public function path($path) { return $path; }
+        public function putFile($path, $file = null, $options = []) { return 'path'; }
+        public function putFileAs($path, $file, $name = null, $options = []) { return 'path'; }
+    };
+
+    $adapter = (new StreamableStorageAdapter($simulatedCloudFs))
+        ->withFallbackPrefixes(['videos/', 'imports/']);
+
+    $file = $adapter->resolve('nature.mp4');
+
+    assertEqual('videos/nature.mp4', $file->path);
+    assertEqual(1048576, $file->size);
+    assertEqual(1700000000, $file->lastModified);
+    assertEqual('custom', $file->disk);
+    assertEqual('video/mp4', $file->mimeType);
+
+    $stream = $file->openStream();
+    assertEqual('simulated s3 video stream', stream_get_contents($stream));
+    fclose($stream);
+});
+
+it('StorageAdapter: throws MediaFileNotFoundException with attempted paths on missing file', function () {
+    $adapter = (new StreamableStorageAdapter())
+        ->withFallbackPrefixes(['videos/', 'imports/']);
+
+    $threw = false;
+    try {
+        $adapter->resolve('missing_podcast.mp3');
+    } catch (MediaFileNotFoundException $e) {
+        $threw = true;
+        assertEqual('missing_podcast.mp3', $e->path);
+        assertEqual(['missing_podcast.mp3', 'videos/missing_podcast.mp3', 'imports/missing_podcast.mp3'], $e->attemptedPaths);
+        assertEqual(404, $e->toResponse()->getStatusCode());
+    }
+    assertTrue($threw);
+});
+
+it('StorageAdapter: fluent configuration immutability', function () {
+    $orig = new StreamableStorageAdapter('public', ['videos/']);
+    $mod = $orig->withDisk('s3')->withFallbackPrefixes(['audio/', 'imports/'])->addFallbackPrefix('podcasts');
+
+    assertEqual('public', $orig->getDiskName());
+    assertEqual(['videos/'], $orig->getFallbackPrefixes());
+    assertEqual('s3', $mod->getDiskName());
+    assertEqual(['audio/', 'imports/', 'podcasts/'], $mod->getFallbackPrefixes());
+});
+
+// Cleanup temp files
+if (file_exists($testFilePath)) unlink($testFilePath);
+if (file_exists($subFilePath)) unlink($subFilePath);
+if (is_dir($subDirPath)) rmdir($subDirPath);
+if (is_dir($tempStorageDir)) rmdir($tempStorageDir);
 
 echo "\n-------------------------------------------------------\n";
 echo "📊 Test Results: {$passed} Passed, {$failed} Failed\n";
