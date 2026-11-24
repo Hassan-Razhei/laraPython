@@ -26,8 +26,12 @@ use EntityStreamer\Core\BinaryStreamer;
 use EntityStreamer\Core\ByteRange;
 use EntityStreamer\Core\RangeHeaderParser;
 use EntityStreamer\Exceptions\InvalidByteRangeException;
+use EntityStreamer\Exceptions\InvalidSignedStreamUrlException;
 use EntityStreamer\Exceptions\MediaFileNotFoundException;
+use EntityStreamer\Exceptions\PathTraversalException;
 use EntityStreamer\Exceptions\StreamResourceException;
+use EntityStreamer\Security\PathSanitizer;
+use EntityStreamer\Security\StreamUrlSigner;
 use EntityStreamer\Storage\StreamableFile;
 use EntityStreamer\Storage\StreamableStorageAdapter;
 use EntityStreamer\Support\MediaHeaderManager;
@@ -719,6 +723,161 @@ it('MediaHeaderManager: builds complete streaming headers array', function () us
     assertTrue(isset($headers['Last-Modified']));
     assertEqual('public, max-age=86400, no-transform', $headers['Cache-Control']);
     assertTrue(str_starts_with($headers['Content-Disposition'], 'inline;'));
+});
+
+// --- Level 5: Security Shield & Signed URLs Tests ---
+echo "\n=======================================================\n";
+echo " 🚀 Running Level 5 Tests for entity-streamer (Security & Signer)\n";
+echo "=======================================================\n\n";
+
+$sanitizer = new PathSanitizer();
+
+it('PathSanitizer: allows valid clean paths', function () use ($sanitizer) {
+    assertEqual('videos/lecture1.mp4', $sanitizer->sanitize('videos/lecture1.mp4'));
+    assertEqual('audio/recitation.mp3', $sanitizer->sanitize('/audio/recitation.mp3'));
+    assertEqual('deep/nested/storage/file.wav', $sanitizer->sanitize('deep//nested/storage/file.wav'));
+    assertTrue($sanitizer->isSafe('videos/lecture.mp4'));
+});
+
+it('PathSanitizer: blocks classic directory traversal (..)', function () use ($sanitizer) {
+    $threw = false;
+    try {
+        $sanitizer->sanitize('../secret.mp4');
+    } catch (PathTraversalException $e) {
+        $threw = true;
+        assertEqual(403, $e->toResponse()->getStatusCode());
+    }
+    assertTrue($threw);
+});
+
+it('PathSanitizer: blocks nested and backslash traversal', function () use ($sanitizer) {
+    $threwNested = false;
+    try {
+        $sanitizer->sanitize('videos/../../etc/passwd');
+    } catch (PathTraversalException) {
+        $threwNested = true;
+    }
+    assertTrue($threwNested);
+
+    $threwWindows = false;
+    try {
+        $sanitizer->sanitize('videos\\..\\..\\windows\\system32');
+    } catch (PathTraversalException) {
+        $threwWindows = true;
+    }
+    assertTrue($threwWindows);
+});
+
+it('PathSanitizer: blocks multi-layer URL encoded traversal (%252e%252e)', function () use ($sanitizer) {
+    $threw = false;
+    try {
+        $sanitizer->sanitize('%252e%252e/admin/video.mp4');
+    } catch (PathTraversalException) {
+        $threw = true;
+    }
+    assertTrue($threw);
+});
+
+it('PathSanitizer: blocks null byte injection', function () use ($sanitizer) {
+    $threw = false;
+    try {
+        $sanitizer->sanitize("video.mp4\0.php");
+    } catch (PathTraversalException) {
+        $threw = true;
+    }
+    assertTrue($threw);
+});
+
+it('PathSanitizer: blocks sensitive dotfiles and Windows devices', function () use ($sanitizer) {
+    assertFalse($sanitizer->isSafe('.env'));
+    assertFalse($sanitizer->isSafe('.git'));
+    assertFalse($sanitizer->isSafe('.htaccess'));
+    assertFalse($sanitizer->isSafe('CON.mp4'));
+    assertFalse($sanitizer->isSafe('NUL.mp3'));
+});
+
+$signer = new StreamUrlSigner('secret_test_key_1234567890_abcdef');
+
+it('StreamUrlSigner: signs and validates media URL', function () use ($signer) {
+    $path = 'videos/lecture-01.mp4';
+    $signedUrl = $signer->sign($path, expiration: 3600);
+
+    assertTrue(str_contains($signedUrl, 'signature='));
+    assertTrue(str_contains($signedUrl, 'expires='));
+
+    parse_str(parse_url($signedUrl, PHP_URL_QUERY), $query);
+    assertTrue($signer->validate($path, $query));
+});
+
+it('StreamUrlSigner: rejects expired streaming signature', function () use ($signer) {
+    $path = 'videos/lecture-01.mp4';
+    $signedUrl = $signer->sign($path, expiration: time() - 50);
+
+    parse_str(parse_url($signedUrl, PHP_URL_QUERY), $query);
+
+    $threw = false;
+    try {
+        $signer->validate($path, $query);
+    } catch (InvalidSignedStreamUrlException $e) {
+        $threw = true;
+        assertEqual(403, $e->toResponse()->getStatusCode());
+    }
+    assertTrue($threw);
+});
+
+it('StreamUrlSigner: rejects tampered path or tampered parameters', function () use ($signer) {
+    $path = 'videos/lecture-01.mp4';
+    $signedUrl = $signer->sign($path, expiration: 3600);
+
+    parse_str(parse_url($signedUrl, PHP_URL_QUERY), $query);
+
+    // Tampered path
+    $threwPath = false;
+    try {
+        $signer->validate('videos/another-lecture.mp4', $query);
+    } catch (InvalidSignedStreamUrlException) {
+        $threwPath = true;
+    }
+    assertTrue($threwPath);
+
+    // Tampered expiration
+    $query['expires'] = (int) $query['expires'] + 5000;
+    $threwExp = false;
+    try {
+        $signer->validate($path, $query);
+    } catch (InvalidSignedStreamUrlException) {
+        $threwExp = true;
+    }
+    assertTrue($threwExp);
+});
+
+it('StreamUrlSigner: IP-binding Anti-Leech protection', function () use ($signer) {
+    $ipSigner = $signer->withIpBinding(true);
+    $path = 'audio/quran.mp3';
+
+    $signedUrl = $ipSigner->sign($path, expiration: 3600, extraParams: ['ip' => '192.168.1.100']);
+    parse_str(parse_url($signedUrl, PHP_URL_QUERY), $query);
+
+    // Matching IP: success
+    assertTrue($ipSigner->validate($path, $query, clientIp: '192.168.1.100'));
+
+    // Different IP: forbidden (Anti-Leech)
+    $threw = false;
+    try {
+        $ipSigner->validate($path, $query, clientIp: '10.0.0.1');
+    } catch (InvalidSignedStreamUrlException) {
+        $threw = true;
+    }
+    assertTrue($threw);
+});
+
+it('StreamUrlSigner: validates directly from Symfony/Laravel Request', function () use ($signer) {
+    $path = 'videos/intro.mp4';
+    $signedUrl = $signer->sign($path, expiration: 1800);
+    parse_str(parse_url($signedUrl, PHP_URL_QUERY), $query);
+
+    $request = Request::create($signedUrl, 'GET', $query);
+    assertTrue($signer->validateRequest($request, $path));
 });
 
 echo "\n-------------------------------------------------------\n";
