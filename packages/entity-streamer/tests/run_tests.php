@@ -30,6 +30,8 @@ use EntityStreamer\Exceptions\MediaFileNotFoundException;
 use EntityStreamer\Exceptions\StreamResourceException;
 use EntityStreamer\Storage\StreamableFile;
 use EntityStreamer\Storage\StreamableStorageAdapter;
+use EntityStreamer\Support\MediaHeaderManager;
+use EntityStreamer\Support\MimeDetector;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Symfony\Component\HttpFoundation\Request;
 
@@ -585,6 +587,139 @@ if (file_exists($testFilePath)) unlink($testFilePath);
 if (file_exists($subFilePath)) unlink($subFilePath);
 if (is_dir($subDirPath)) rmdir($subDirPath);
 if (is_dir($tempStorageDir)) rmdir($tempStorageDir);
+
+// --- Level 4: Format Intelligence & Caching Tests ---
+echo "\n=======================================================\n";
+echo " 🚀 Running Level 4 Tests for entity-streamer (MIME & Headers)\n";
+echo "=======================================================\n\n";
+
+$mimeDetector = new MimeDetector();
+
+it('MimeDetector: detects all major video extensions', function () use ($mimeDetector) {
+    $videoExtensions = [
+        'mp4' => 'video/mp4', 'm4v' => 'video/mp4', 'webm' => 'video/webm',
+        'mkv' => 'video/x-matroska', 'mov' => 'video/quicktime', 'qt' => 'video/quicktime',
+        'avi' => 'video/x-msvideo', 'wmv' => 'video/x-ms-wmv', 'flv' => 'video/x-flv',
+        'ogv' => 'video/ogg', 'ts' => 'video/mp2t', '3gp' => 'video/3gpp',
+        'mpeg' => 'video/mpeg', 'mpg' => 'video/mpeg',
+    ];
+
+    foreach ($videoExtensions as $ext => $expected) {
+        $detected = $mimeDetector->detect("test.{$ext}");
+        assertEqual($expected, $detected, "Extension {$ext}");
+        assertTrue($mimeDetector->isVideo($detected));
+        assertTrue($mimeDetector->isVideoExtension($ext));
+    }
+});
+
+it('MimeDetector: detects all major audio extensions', function () use ($mimeDetector) {
+    $audioExtensions = [
+        'mp3' => 'audio/mpeg', 'wav' => 'audio/wav', 'm4a' => 'audio/mp4',
+        'aac' => 'audio/aac', 'flac' => 'audio/flac', 'ogg' => 'audio/ogg',
+        'opus' => 'audio/opus', 'weba' => 'audio/webm', 'wma' => 'audio/x-ms-wma',
+        'aif' => 'audio/x-aiff', 'mid' => 'audio/midi', 'amr' => 'audio/amr',
+    ];
+
+    foreach ($audioExtensions as $ext => $expected) {
+        $detected = $mimeDetector->detect("test.{$ext}");
+        assertEqual($expected, $detected, "Extension {$ext}");
+        assertTrue($mimeDetector->isAudio($detected));
+        assertTrue($mimeDetector->isAudioExtension($ext));
+    }
+});
+
+it('MimeDetector: detects from binary magic bytes', function () use ($mimeDetector) {
+    // FLAC
+    assertEqual('audio/flac', $mimeDetector->detect('unknown', "fLaC\x00\x00\x00\x22"));
+    // WAV
+    assertEqual('audio/wav', $mimeDetector->detect('unknown', "RIFF\x24\x00\x00\x00WAVEfmt "));
+    // AVI
+    assertEqual('video/x-msvideo', $mimeDetector->detect('unknown', "RIFF\x24\x00\x00\x00AVI LIST"));
+    // MP4
+    assertEqual('video/mp4', $mimeDetector->detect('unknown', "\x00\x00\x00\x20ftypisom\x00\x00\x02\x00"));
+    // M4A
+    assertEqual('audio/mp4', $mimeDetector->detect('unknown', "\x00\x00\x00\x20ftypM4A \x00\x00\x02\x00"));
+    // ID3 MP3
+    assertEqual('audio/mpeg', $mimeDetector->detect('unknown', "ID3\x03\x00\x00\x00"));
+    // EBML MKV
+    assertEqual('video/x-matroska', $mimeDetector->detect('unknown', "\x1A\x45\xDF\xA3\x9F\x42\x86\x81\x01\x42matroska"));
+    // Ogg
+    assertEqual('audio/ogg', $mimeDetector->detect('unknown', "OggS\x00\x02\x00\x00"));
+});
+
+$headerManager = new MediaHeaderManager($mimeDetector);
+$sampleFile = new StreamableFile(
+    path: 'videos/شرح_المخطوطات.mp4',
+    size: 5242880,
+    lastModified: 1700000000,
+    disk: 'public',
+    mimeType: 'video/mp4'
+);
+
+it('MediaHeaderManager: generates ETag (weak and strong)', function () use ($headerManager, $sampleFile) {
+    $weakEtag = $headerManager->generateEtag($sampleFile);
+    assertTrue(str_starts_with($weakEtag, 'W/"'));
+    assertTrue(str_ends_with($weakEtag, '"'));
+
+    $strongMgr = (new MediaHeaderManager())->withWeakEtag(false);
+    $strongEtag = $strongMgr->generateEtag($sampleFile);
+    assertFalse(str_starts_with($strongEtag, 'W/'));
+    assertEqual('"' . sprintf('%x-%x', 5242880, 1700000000) . '"', $strongEtag);
+});
+
+it('MediaHeaderManager: formats Content-Disposition with UTF-8 RFC 5987', function () use ($headerManager) {
+    $disposition = $headerManager->formatContentDisposition('شرح_المنظومة.mp4', inline: true);
+    assertTrue(str_starts_with($disposition, 'inline;'));
+    assertTrue(str_contains($disposition, "filename*=UTF-8''"));
+    assertTrue(str_contains($disposition, rawurlencode('شرح_المنظومة.mp4')));
+
+    $attachment = $headerManager->formatContentDisposition('audio.mp3', inline: false);
+    assertTrue(str_starts_with($attachment, 'attachment;'));
+});
+
+it('MediaHeaderManager: conditional request returns 304 on matching If-None-Match', function () use ($headerManager, $sampleFile) {
+    $etag = $headerManager->generateEtag($sampleFile);
+    $request = Request::create('/stream/video.mp4', 'GET', [], [], [], [
+        'HTTP_IF_NONE_MATCH' => $etag,
+    ]);
+
+    $response = $headerManager->checkNotModified($request, $sampleFile);
+    assertTrue($response !== null);
+    assertEqual(304, $response->getStatusCode());
+    assertEqual($etag, $response->headers->get('ETag'));
+    assertEqual('bytes', $response->headers->get('Accept-Ranges'));
+});
+
+it('MediaHeaderManager: conditional request returns 304 on valid If-Modified-Since', function () use ($headerManager, $sampleFile) {
+    $rfcDate = gmdate('D, d M Y H:i:s \G\M\T', 1700000500); // 500s later than file
+    $request = Request::create('/stream/video.mp4', 'GET', [], [], [], [
+        'HTTP_IF_MODIFIED_SINCE' => $rfcDate,
+    ]);
+
+    $response = $headerManager->checkNotModified($request, $sampleFile);
+    assertTrue($response !== null);
+    assertEqual(304, $response->getStatusCode());
+});
+
+it('MediaHeaderManager: conditional request returns null when file is modified', function () use ($headerManager, $sampleFile) {
+    $rfcDate = gmdate('D, d M Y H:i:s \G\M\T', 1600000000); // Older than file
+    $request = Request::create('/stream/video.mp4', 'GET', [], [], [], [
+        'HTTP_IF_MODIFIED_SINCE' => $rfcDate,
+    ]);
+
+    $response = $headerManager->checkNotModified($request, $sampleFile);
+    assertTrue($response === null);
+});
+
+it('MediaHeaderManager: builds complete streaming headers array', function () use ($headerManager, $sampleFile) {
+    $headers = $headerManager->buildHeaders($sampleFile, inline: true);
+    assertEqual('video/mp4', $headers['Content-Type']);
+    assertEqual('bytes', $headers['Accept-Ranges']);
+    assertTrue(isset($headers['ETag']));
+    assertTrue(isset($headers['Last-Modified']));
+    assertEqual('public, max-age=86400, no-transform', $headers['Cache-Control']);
+    assertTrue(str_starts_with($headers['Content-Disposition'], 'inline;'));
+});
 
 echo "\n-------------------------------------------------------\n";
 echo "📊 Test Results: {$passed} Passed, {$failed} Failed\n";
