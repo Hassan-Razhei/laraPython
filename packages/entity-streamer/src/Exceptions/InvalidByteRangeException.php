@@ -19,6 +19,11 @@ class InvalidByteRangeException extends RuntimeException
         parent::__construct($message, $code, $previous);
     }
 
+    public function getStatusCode(): int
+    {
+        return $this->getCode() ?: Response::HTTP_REQUESTED_RANGE_NOT_SATISFIABLE;
+    }
+
     /**
      * Get the standard RFC 7233 Content-Range header value for 416 response.
      */
@@ -43,4 +48,3 @@ class InvalidByteRangeException extends RuntimeException
         );
     }
 }
-

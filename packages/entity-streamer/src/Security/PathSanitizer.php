@@ -34,15 +34,15 @@ class PathSanitizer
     /**
      * Sanitize and normalize a path, throwing an exception on malicious patterns.
      *
-     * @param string $path Raw user-supplied path
+     * @param  string  $path  Raw user-supplied path
      * @return string Normalized relative path
      *
      * @throws PathTraversalException
      */
     public function sanitize(string $path): string
     {
-        // 1. Check for null byte injection
-        if (str_contains($path, "\0") || str_contains($path, '%00')) {
+        // 1. Check for null byte injection (binary, URL-encoded, or escaped)
+        if (str_contains($path, "\0") || str_contains($path, '%00') || str_contains($path, '\0') || str_contains($path, '\x00')) {
             throw new PathTraversalException($path, 'Null byte detected in path.');
         }
 
@@ -96,7 +96,8 @@ class PathSanitizer
         }
 
         $result = implode('/', $safeSegments);
-        return $isAbsolute ? '/' . $result : $result;
+
+        return $isAbsolute ? '/'.$result : $result;
     }
 
     /**
@@ -106,10 +107,10 @@ class PathSanitizer
     {
         try {
             $this->sanitize($path);
+
             return true;
         } catch (PathTraversalException) {
             return false;
         }
     }
 }
-

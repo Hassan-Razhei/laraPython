@@ -18,8 +18,8 @@ class RangeHeaderParser
     /**
      * Parse an HTTP Range header string against a known total file size.
      *
-     * @param string|null $rangeHeader Raw Range header, e.g. "bytes=0-1024"
-     * @param int $totalSize Total file size in bytes
+     * @param  string|null  $rangeHeader  Raw Range header, e.g. "bytes=0-1024"
+     * @param  int  $totalSize  Total file size in bytes
      * @return ByteRange Parsed immutable ByteRange instance
      *
      * @throws InvalidByteRangeException When range is unsatisfiable (HTTP 416)
@@ -51,7 +51,7 @@ class RangeHeaderParser
         $trimmed = trim($rangeHeader);
 
         // RFC 7233: If the range unit is not "bytes", ignore and serve 200 OK
-        if (!preg_match('/^bytes\s*=\s*(.+)$/i', $trimmed, $matches)) {
+        if (! preg_match('/^bytes\s*=\s*(.+)$/i', $trimmed, $matches)) {
             return ByteRange::full($totalSize);
         }
 
@@ -65,8 +65,8 @@ class RangeHeaderParser
             $rangeSpec = trim($rangeSpecs);
         }
 
-        // Match the single range spec: "start-end", "start-", or "-suffix"
-        if (!preg_match('/^(\d*)-(\d*)$/', $rangeSpec, $parts)) {
+        // Match the single range spec: "start-end", "start-", or "-suffix" (allowing optional whitespace around hyphen)
+        if (! preg_match('/^(\d*)\s*-\s*(\d*)$/', $rangeSpec, $parts)) {
             // Unrecognized range format: ignore and return full content (200 OK)
             return ByteRange::full($totalSize);
         }
@@ -157,7 +157,7 @@ class RangeHeaderParser
     public function parseRequest(Request $request, int $totalSize): ByteRange
     {
         $header = $request->headers->get('Range');
+
         return $this->parse($header, $totalSize);
     }
 }
-

@@ -98,7 +98,7 @@ class StreamerManager
         $bind = (bool) ($this->config['security']['bind_to_ip'] ?? false);
         $signer = new StreamUrlSigner(bindToIp: $bind);
 
-        return $signer->validateRequest($request, $path);
+        return $signer->isValidRequest($request, $path);
     }
 
     /**

@@ -16,6 +16,7 @@ use Symfony\Component\HttpFoundation\Request;
 class StreamUrlSigner
 {
     protected string $secretKey;
+
     protected bool $bindToIp = false;
 
     public function __construct(?string $secretKey = null, bool $bindToIp = false)
@@ -28,6 +29,7 @@ class StreamUrlSigner
     {
         $clone = clone $this;
         $clone->secretKey = $key;
+
         return $clone;
     }
 
@@ -35,15 +37,16 @@ class StreamUrlSigner
     {
         $clone = clone $this;
         $clone->bindToIp = $bind;
+
         return $clone;
     }
 
     /**
      * Sign a media path or URL with an expiration and optional context parameters.
      *
-     * @param string $path Target relative path or URL
-     * @param DateTimeInterface|DateInterval|int $expiration Expiration timestamp or interval
-     * @param array<string, mixed> $extraParams Context parameters (e.g. 'ip' => '1.2.3.4')
+     * @param  string  $path  Target relative path or URL
+     * @param  DateTimeInterface|DateInterval|int  $expiration  Expiration timestamp or interval
+     * @param  array<string, mixed>  $extraParams  Context parameters (e.g. 'ip' => '1.2.3.4')
      * @return string Signed query string or complete signed URL
      */
     public function sign(string $path, mixed $expiration, array $extraParams = []): string
@@ -54,7 +57,7 @@ class StreamUrlSigner
             'expires' => $expires,
         ]);
 
-        if ($this->bindToIp && !isset($params['ip']) && isset($_SERVER['REMOTE_ADDR'])) {
+        if ($this->bindToIp && ! isset($params['ip']) && isset($_SERVER['REMOTE_ADDR'])) {
             $params['ip'] = (string) $_SERVER['REMOTE_ADDR'];
         }
 
@@ -67,10 +70,10 @@ class StreamUrlSigner
         $queryString = http_build_query($params);
 
         if (str_contains($path, '?')) {
-            return $path . '&' . $queryString;
+            return $path.'&'.$queryString;
         }
 
-        return $path . '?' . $queryString;
+        return $path.'?'.$queryString;
     }
 
     /**
@@ -87,18 +90,41 @@ class StreamUrlSigner
     }
 
     /**
+     * Check whether a signed URL request is valid without throwing an exception.
+     */
+    public function isValidRequest(Request $request, string $path): bool
+    {
+        try {
+            return $this->validateRequest($request, $path);
+        } catch (InvalidSignedStreamUrlException) {
+            return false;
+        }
+    }
+
+    /**
+     * Check whether query parameters and signature are valid without throwing an exception.
+     */
+    public function isValid(string $path, array $queryParams, ?string $clientIp = null): bool
+    {
+        try {
+            return $this->validate($path, $queryParams, $clientIp);
+        } catch (InvalidSignedStreamUrlException) {
+            return false;
+        }
+    }
+
+    /**
      * Validate query parameters and signature against path and client IP.
      *
-     * @param string $path Media path
-     * @param array<string, mixed> $queryParams Request query parameters
-     * @param string|null $clientIp Client IP if IP-binding is enabled
-     * @return bool
+     * @param  string  $path  Media path
+     * @param  array<string, mixed>  $queryParams  Request query parameters
+     * @param  string|null  $clientIp  Client IP if IP-binding is enabled
      *
      * @throws InvalidSignedStreamUrlException
      */
     public function validate(string $path, array $queryParams, ?string $clientIp = null): bool
     {
-        if (!isset($queryParams['signature']) || !isset($queryParams['expires'])) {
+        if (! isset($queryParams['signature']) || ! isset($queryParams['expires'])) {
             throw new InvalidSignedStreamUrlException('Missing signature or expiration parameters.');
         }
 
@@ -126,7 +152,7 @@ class StreamUrlSigner
         $expectedSignature = $this->computeSignature($path, $cleanParams);
 
         // Constant-time string comparison to prevent timing attacks
-        if (!hash_equals($expectedSignature, $providedSignature)) {
+        if (! hash_equals($expectedSignature, $providedSignature)) {
             throw new InvalidSignedStreamUrlException('Signature verification failed.');
         }
 
@@ -136,12 +162,12 @@ class StreamUrlSigner
     /**
      * Compute HMAC-SHA256 signature for path and sorted query parameters.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     public function computeSignature(string $path, array $params): string
     {
         ksort($params);
-        $payload = ltrim($path, '/') . '::' . http_build_query($params);
+        $payload = ltrim($path, '/').'::'.http_build_query($params);
 
         return hash_hmac('sha256', $payload, $this->secretKey);
     }
@@ -153,7 +179,7 @@ class StreamUrlSigner
         }
 
         if ($expiration instanceof DateInterval) {
-            return (new \DateTimeImmutable())->add($expiration)->getTimestamp();
+            return (new \DateTimeImmutable)->add($expiration)->getTimestamp();
         }
 
         if (is_numeric($expiration)) {
@@ -162,6 +188,7 @@ class StreamUrlSigner
             if ($val < 1_000_000_000) {
                 return time() + $val;
             }
+
             return $val;
         }
 
@@ -186,4 +213,3 @@ class StreamUrlSigner
         return 'entity_streamer_default_secret_fallback_key';
     }
 }
-

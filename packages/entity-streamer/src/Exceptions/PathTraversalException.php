@@ -21,6 +21,11 @@ class PathTraversalException extends StreamResourceException
         parent::__construct($message, $code, $previous);
     }
 
+    public function getStatusCode(): int
+    {
+        return $this->getCode() ?: Response::HTTP_FORBIDDEN;
+    }
+
     public function toResponse(): Response
     {
         return new Response(
@@ -30,4 +35,3 @@ class PathTraversalException extends StreamResourceException
         );
     }
 }
-

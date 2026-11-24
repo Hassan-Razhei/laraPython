@@ -9,9 +9,9 @@ use Symfony\Component\HttpFoundation\Response;
 class MediaFileNotFoundException extends StreamResourceException
 {
     /**
-     * @param string $path Target requested path
-     * @param string|null $disk Storage disk identifier
-     * @param array<int, string> $attemptedPaths All attempted candidate paths (including fallbacks)
+     * @param  string  $path  Target requested path
+     * @param  string|null  $disk  Storage disk identifier
+     * @param  array<int, string>  $attemptedPaths  All attempted candidate paths (including fallbacks)
      */
     public function __construct(
         public readonly string $path,
@@ -23,11 +23,16 @@ class MediaFileNotFoundException extends StreamResourceException
     ) {
         if ($message === '') {
             $diskInfo = $disk !== null ? " on disk [{$disk}]" : '';
-            $attempted = !empty($attemptedPaths) ? ' (Checked: ' . implode(', ', $attemptedPaths) . ')' : '';
+            $attempted = ! empty($attemptedPaths) ? ' (Checked: '.implode(', ', $attemptedPaths).')' : '';
             $message = "Media file [{$path}] could not be found{$diskInfo}{$attempted}.";
         }
 
-        parent::__construct($message);
+        parent::__construct($message, $code, $previous);
+    }
+
+    public function getStatusCode(): int
+    {
+        return $this->getCode() ?: Response::HTTP_NOT_FOUND;
     }
 
     /**
@@ -42,4 +47,3 @@ class MediaFileNotFoundException extends StreamResourceException
         );
     }
 }
-
