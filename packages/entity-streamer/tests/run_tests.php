@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/../../../vendor/autoload.php';
+require_once __DIR__.'/../../../vendor/autoload.php';
 
 // Register autoloader for EntityStreamer
 spl_autoload_register(function ($class) {
     $prefix = 'EntityStreamer\\';
-    $baseDir = __DIR__ . '/../src/';
+    $baseDir = __DIR__.'/../src/';
 
     $len = strlen($prefix);
     if (strncmp($prefix, $class, $len) !== 0) {
@@ -15,7 +15,7 @@ spl_autoload_register(function ($class) {
     }
 
     $relativeClass = substr($class, $len);
-    $file = $baseDir . str_replace('\\', '/', $relativeClass) . '.php';
+    $file = $baseDir.str_replace('\\', '/', $relativeClass).'.php';
 
     if (file_exists($file)) {
         require_once $file;
@@ -35,6 +35,8 @@ use EntityStreamer\Security\PathSanitizer;
 use EntityStreamer\Security\StreamUrlSigner;
 use EntityStreamer\Storage\StreamableFile;
 use EntityStreamer\Storage\StreamableStorageAdapter;
+use EntityStreamer\StreamerBuilder;
+use EntityStreamer\StreamerManager;
 use EntityStreamer\Support\MediaHeaderManager;
 use EntityStreamer\Support\MimeDetector;
 use EntityStreamer\Traits\HasStreamableMedia;
@@ -49,33 +51,37 @@ $it = function (string $description, callable $test) use (&$passed, &$failed) {
         $test();
         echo "\033[32m✔ PASS:\033[0m {$description}\n";
         $passed++;
-    } catch (\Throwable $e) {
+    } catch (Throwable $e) {
         echo "\033[31m✖ FAIL:\033[0m {$description}\n";
-        echo "  \033[33mError: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine() . "\033[0m\n";
+        echo "  \033[33mError: ".$e->getMessage().' in '.$e->getFile().':'.$e->getLine()."\033[0m\n";
         $failed++;
     }
 };
 
-function it(string $description, callable $test) {
+function it(string $description, callable $test)
+{
     global $it;
     $it($description, $test);
 }
 
-function assertEqual($expected, $actual, string $msg = '') {
+function assertEqual($expected, $actual, string $msg = '')
+{
     if ($expected !== $actual) {
-        throw new \Exception("Assertion failed: expected " . var_export($expected, true) . ", got " . var_export($actual, true) . " ({$msg})");
+        throw new Exception('Assertion failed: expected '.var_export($expected, true).', got '.var_export($actual, true)." ({$msg})");
     }
 }
 
-function assertTrue($condition, string $msg = '') {
-    if (!$condition) {
-        throw new \Exception("Assertion failed: expected true, got false ({$msg})");
+function assertTrue($condition, string $msg = '')
+{
+    if (! $condition) {
+        throw new Exception("Assertion failed: expected true, got false ({$msg})");
     }
 }
 
-function assertFalse($condition, string $msg = '') {
+function assertFalse($condition, string $msg = '')
+{
     if ($condition) {
-        throw new \Exception("Assertion failed: expected false, got true ({$msg})");
+        throw new Exception("Assertion failed: expected false, got true ({$msg})");
     }
 }
 
@@ -163,7 +169,7 @@ it('ByteRange: toArray contains all standard metrics', function () {
 });
 
 // --- RangeHeaderParser Tests ---
-$parser = new RangeHeaderParser();
+$parser = new RangeHeaderParser;
 
 it('RangeHeaderParser: parses closed range (bytes=0-1024)', function () use ($parser) {
     $range = $parser->parse('bytes=0-1024', 50000);
@@ -275,7 +281,7 @@ it('RangeHeaderParser: throws 416 when Range requested on empty file', function 
 it('RangeHeaderParser: exception generates compliant HTTP 416 response', function () use ($parser) {
     try {
         $parser->parse('bytes=5000-', 1000);
-        throw new \Exception('Expected exception was not thrown');
+        throw new Exception('Expected exception was not thrown');
     } catch (InvalidByteRangeException $e) {
         assertEqual(1000, $e->totalSize);
         assertEqual('bytes */1000', $e->toContentRangeHeader());
@@ -361,7 +367,7 @@ it('BinaryStreamer: chunking with small buffers (5000 bytes via 1KB chunks)', fu
 });
 
 it('BinaryStreamer: stream full file content (HTTP 200 representation)', function () use ($tmpFile, $sampleText) {
-    $streamer = new BinaryStreamer();
+    $streamer = new BinaryStreamer;
     $total = strlen($sampleText);
     $range = ByteRange::full($total);
 
@@ -378,7 +384,7 @@ it('BinaryStreamer: stream full file content (HTTP 200 representation)', functio
 });
 
 it('BinaryStreamer: creates StreamedResponse with RFC 7233 partial headers', function () use ($tmpFile, $sampleText) {
-    $streamer = new BinaryStreamer();
+    $streamer = new BinaryStreamer;
     $total = strlen($sampleText);
     $range = ByteRange::partial(start: 50, end: 150, total: $total);
 
@@ -396,7 +402,7 @@ it('BinaryStreamer: creates StreamedResponse with RFC 7233 partial headers', fun
 });
 
 it('BinaryStreamer: creates StreamedResponse for full file (200 OK without Content-Range)', function () use ($tmpFile, $sampleText) {
-    $streamer = new BinaryStreamer();
+    $streamer = new BinaryStreamer;
     $total = strlen($sampleText);
     $range = ByteRange::full($total);
 
@@ -414,7 +420,7 @@ it('BinaryStreamer: creates StreamedResponse for full file (200 OK without Conte
 });
 
 it('BinaryStreamer: throws StreamResourceException on missing file', function () {
-    $streamer = new BinaryStreamer();
+    $streamer = new BinaryStreamer;
     $range = ByteRange::full(100);
     $threw = false;
     try {
@@ -426,7 +432,7 @@ it('BinaryStreamer: throws StreamResourceException on missing file', function ()
 });
 
 it('BinaryStreamer: throws StreamResourceException on invalid resource type', function () {
-    $streamer = new BinaryStreamer();
+    $streamer = new BinaryStreamer;
     $range = ByteRange::full(100);
     $threw = false;
     try {
@@ -473,18 +479,18 @@ echo "\n=======================================================\n";
 echo " 🚀 Running Level 3 Tests for entity-streamer (Storage Adapter)\n";
 echo "=======================================================\n\n";
 
-$tempStorageDir = sys_get_temp_dir() . '/streamer_l3_' . uniqid();
+$tempStorageDir = sys_get_temp_dir().'/streamer_l3_'.uniqid();
 mkdir($tempStorageDir, 0777, true);
-$testFilePath = $tempStorageDir . '/audio.mp3';
+$testFilePath = $tempStorageDir.'/audio.mp3';
 file_put_contents($testFilePath, 'sample audio content');
 
-$subDirPath = $tempStorageDir . '/videos';
+$subDirPath = $tempStorageDir.'/videos';
 mkdir($subDirPath, 0777, true);
-$subFilePath = $subDirPath . '/intro.mp4';
+$subFilePath = $subDirPath.'/intro.mp4';
 file_put_contents($subFilePath, 'sample video content');
 
 it('StorageAdapter: resolves local direct file', function () use ($testFilePath) {
-    $adapter = new StreamableStorageAdapter();
+    $adapter = new StreamableStorageAdapter;
     $file = $adapter->resolve($testFilePath);
 
     assertTrue($file instanceof StreamableFile);
@@ -499,12 +505,12 @@ it('StorageAdapter: resolves local direct file', function () use ($testFilePath)
 });
 
 it('StorageAdapter: resolves via fallback directories on local disk', function () use ($tempStorageDir) {
-    $adapter = (new StreamableStorageAdapter())
-        ->withFallbackPrefixes([$tempStorageDir . '/videos']);
+    $adapter = (new StreamableStorageAdapter)
+        ->withFallbackPrefixes([$tempStorageDir.'/videos']);
 
     $file = $adapter->resolve('intro.mp4');
 
-    assertEqual($tempStorageDir . '/videos/intro.mp4', $file->path);
+    assertEqual($tempStorageDir.'/videos/intro.mp4', $file->path);
     assertEqual(strlen('sample video content'), $file->size);
 
     $stream = $file->openStream();
@@ -514,36 +520,131 @@ it('StorageAdapter: resolves via fallback directories on local disk', function (
 
 it('StorageAdapter: resolves via custom Filesystem interface (simulated cloud disk)', function () {
     // Custom mock class implementing Filesystem
-    $simulatedCloudFs = new class implements Filesystem {
-        public function exists($path) { return $path === 'videos/nature.mp4'; }
-        public function get($path) { return 'simulated s3 content'; }
-        public function readStream($path) {
+    $simulatedCloudFs = new class implements Filesystem
+    {
+        public function exists($path)
+        {
+            return $path === 'videos/nature.mp4';
+        }
+
+        public function get($path)
+        {
+            return 'simulated s3 content';
+        }
+
+        public function readStream($path)
+        {
             $h = fopen('php://memory', 'w+b');
             fwrite($h, 'simulated s3 video stream');
             rewind($h);
+
             return $h;
         }
-        public function put($path, $contents, $options = []) { return true; }
-        public function writeStream($path, $resource, array $options = []) { return true; }
-        public function getVisibility($path) { return 'public'; }
-        public function setVisibility($path, $visibility) { return true; }
-        public function prepend($path, $data) { return true; }
-        public function append($path, $data) { return true; }
-        public function delete($paths) { return true; }
-        public function copy($from, $to) { return true; }
-        public function move($from, $to) { return true; }
-        public function size($path) { return 1048576; }
-        public function lastModified($path) { return 1700000000; }
-        public function files($directory = null, $recursive = false) { return []; }
-        public function allFiles($directory = null) { return []; }
-        public function directories($directory = null, $recursive = false) { return []; }
-        public function allDirectories($directory = null) { return []; }
-        public function makeDirectory($path) { return true; }
-        public function deleteDirectory($directory) { return true; }
-        public function mimeType($path) { return 'video/mp4'; }
-        public function path($path) { return $path; }
-        public function putFile($path, $file = null, $options = []) { return 'path'; }
-        public function putFileAs($path, $file, $name = null, $options = []) { return 'path'; }
+
+        public function put($path, $contents, $options = [])
+        {
+            return true;
+        }
+
+        public function writeStream($path, $resource, array $options = [])
+        {
+            return true;
+        }
+
+        public function getVisibility($path)
+        {
+            return 'public';
+        }
+
+        public function setVisibility($path, $visibility)
+        {
+            return true;
+        }
+
+        public function prepend($path, $data)
+        {
+            return true;
+        }
+
+        public function append($path, $data)
+        {
+            return true;
+        }
+
+        public function delete($paths)
+        {
+            return true;
+        }
+
+        public function copy($from, $to)
+        {
+            return true;
+        }
+
+        public function move($from, $to)
+        {
+            return true;
+        }
+
+        public function size($path)
+        {
+            return 1048576;
+        }
+
+        public function lastModified($path)
+        {
+            return 1700000000;
+        }
+
+        public function files($directory = null, $recursive = false)
+        {
+            return [];
+        }
+
+        public function allFiles($directory = null)
+        {
+            return [];
+        }
+
+        public function directories($directory = null, $recursive = false)
+        {
+            return [];
+        }
+
+        public function allDirectories($directory = null)
+        {
+            return [];
+        }
+
+        public function makeDirectory($path)
+        {
+            return true;
+        }
+
+        public function deleteDirectory($directory)
+        {
+            return true;
+        }
+
+        public function mimeType($path)
+        {
+            return 'video/mp4';
+        }
+
+        public function path($path)
+        {
+            return $path;
+        }
+
+        public function putFile($path, $file = null, $options = [])
+        {
+            return 'path';
+        }
+
+        public function putFileAs($path, $file, $name = null, $options = [])
+        {
+            return 'path';
+        }
     };
 
     $adapter = (new StreamableStorageAdapter($simulatedCloudFs))
@@ -563,7 +664,7 @@ it('StorageAdapter: resolves via custom Filesystem interface (simulated cloud di
 });
 
 it('StorageAdapter: throws MediaFileNotFoundException with attempted paths on missing file', function () {
-    $adapter = (new StreamableStorageAdapter())
+    $adapter = (new StreamableStorageAdapter)
         ->withFallbackPrefixes(['videos/', 'imports/']);
 
     $threw = false;
@@ -589,17 +690,25 @@ it('StorageAdapter: fluent configuration immutability', function () {
 });
 
 // Cleanup temp files
-if (file_exists($testFilePath)) unlink($testFilePath);
-if (file_exists($subFilePath)) unlink($subFilePath);
-if (is_dir($subDirPath)) rmdir($subDirPath);
-if (is_dir($tempStorageDir)) rmdir($tempStorageDir);
+if (file_exists($testFilePath)) {
+    unlink($testFilePath);
+}
+if (file_exists($subFilePath)) {
+    unlink($subFilePath);
+}
+if (is_dir($subDirPath)) {
+    rmdir($subDirPath);
+}
+if (is_dir($tempStorageDir)) {
+    rmdir($tempStorageDir);
+}
 
 // --- Level 4: Format Intelligence & Caching Tests ---
 echo "\n=======================================================\n";
 echo " 🚀 Running Level 4 Tests for entity-streamer (MIME & Headers)\n";
 echo "=======================================================\n\n";
 
-$mimeDetector = new MimeDetector();
+$mimeDetector = new MimeDetector;
 
 it('MimeDetector: detects all major video extensions', function () use ($mimeDetector) {
     $videoExtensions = [
@@ -667,10 +776,10 @@ it('MediaHeaderManager: generates ETag (weak and strong)', function () use ($hea
     assertTrue(str_starts_with($weakEtag, 'W/"'));
     assertTrue(str_ends_with($weakEtag, '"'));
 
-    $strongMgr = (new MediaHeaderManager())->withWeakEtag(false);
+    $strongMgr = (new MediaHeaderManager)->withWeakEtag(false);
     $strongEtag = $strongMgr->generateEtag($sampleFile);
     assertFalse(str_starts_with($strongEtag, 'W/'));
-    assertEqual('"' . sprintf('%x-%x', 5242880, 1700000000) . '"', $strongEtag);
+    assertEqual('"'.sprintf('%x-%x', 5242880, 1700000000).'"', $strongEtag);
 });
 
 it('MediaHeaderManager: formats Content-Disposition with UTF-8 RFC 5987', function () use ($headerManager) {
@@ -732,7 +841,7 @@ echo "\n=======================================================\n";
 echo " 🚀 Running Level 5 Tests for entity-streamer (Security & Signer)\n";
 echo "=======================================================\n\n";
 
-$sanitizer = new PathSanitizer();
+$sanitizer = new PathSanitizer;
 
 it('PathSanitizer: allows valid clean paths', function () use ($sanitizer) {
     assertEqual('videos/lecture1.mp4', $sanitizer->sanitize('videos/lecture1.mp4'));
@@ -891,9 +1000,7 @@ class TestDummyVideoModel implements CanStreamMedia
 {
     use HasStreamableMedia;
 
-    public function __construct(public array $attributes = [])
-    {
-    }
+    public function __construct(public array $attributes = []) {}
 
     public function getAttribute(string $key): mixed
     {
@@ -908,12 +1015,10 @@ class TestDummyMultiMediaModel implements CanStreamMedia
     protected array $streamableMedia = [
         'default' => 'video_path',
         'trailer' => 'trailer_path',
-        'audio'   => 'audio_path',
+        'audio' => 'audio_path',
     ];
 
-    public function __construct(public array $attributes = [])
-    {
-    }
+    public function __construct(public array $attributes = []) {}
 
     public function getAttribute(string $key): mixed
     {
@@ -940,7 +1045,7 @@ it('HasStreamableMedia: multi-channel media mapping', function () use ($eloquent
     file_put_contents($trailerFile, 'trailer audio');
 
     $model = new TestDummyMultiMediaModel([
-        'video_path'   => $eloquentTempFile,
+        'video_path' => $eloquentTempFile,
         'trailer_path' => $trailerFile,
     ]);
 
@@ -1013,6 +1118,83 @@ it('HasStreamableMedia: returns 304 Not Modified from model when matching ETag',
 
 if (file_exists($eloquentTempFile)) {
     unlink($eloquentTempFile);
+}
+
+// --- Level 7: StreamerManager & Facade Integration Tests ---
+echo "\n=======================================================\n";
+echo " 🚀 Running Level 7 Tests for entity-streamer (Manager & Facade)\n";
+echo "=======================================================\n\n";
+
+$facadeTempFile = tempnam(sys_get_temp_dir(), 'manager_test_');
+$facadeContent = str_repeat('Testing Streamer Manager Level 7 Content! ', 200);
+file_put_contents($facadeTempFile, $facadeContent);
+
+$manager = new StreamerManager([
+    'chunk_size' => 32768,
+    'fallback_prefixes' => ['videos/', 'imports/'],
+    'cache' => [
+        'control' => 'public, max-age=7200',
+        'weak_etag' => true,
+    ],
+    'security' => [
+        'signature_ttl' => 1800,
+        'bind_to_ip' => false,
+    ],
+]);
+
+it('StreamerManager: returns fluent builder and resolves file', function () use ($manager, $facadeTempFile, $facadeContent) {
+    $builder = $manager->stream($facadeTempFile);
+    assertTrue($builder instanceof StreamerBuilder);
+
+    $file = $builder->resolveFile();
+    assertTrue($file instanceof StreamableFile);
+    assertEqual(strlen($facadeContent), $file->size);
+});
+
+it('StreamerManager: fluent builder produces RFC 7233 partial response', function () use ($manager, $facadeTempFile) {
+    $request = Request::create('/stream/media', 'GET', [], [], [], [
+        'HTTP_RANGE' => 'bytes=100-300',
+    ]);
+
+    $response = $manager->stream($facadeTempFile)
+        ->withChunkSize(4096)
+        ->asInline('lecture.mp4')
+        ->toResponse($request);
+
+    assertEqual(206, $response->getStatusCode());
+    assertEqual('bytes', $response->headers->get('Accept-Ranges'));
+    assertEqual('201', $response->headers->get('Content-Length'));
+    assertTrue(str_starts_with((string) $response->headers->get('Content-Range'), 'bytes 100-300/'));
+    assertTrue(str_contains((string) $response->headers->get('Content-Disposition'), 'lecture.mp4'));
+});
+
+it('StreamerManager: signs and validates streaming URLs', function () use ($manager) {
+    $path = 'videos/quran-recitation.mp4';
+    $signedUrl = $manager->sign($path, expiration: 1800);
+
+    assertTrue(str_contains($signedUrl, 'signature='));
+    assertTrue(str_contains($signedUrl, 'expires='));
+
+    parse_str(parse_url($signedUrl, PHP_URL_QUERY), $query);
+    $request = Request::create($signedUrl, 'GET', $query);
+
+    assertTrue($manager->validateSignature($request, $path));
+});
+
+it('StreamerManager: formats attachment mode with custom filename', function () use ($manager, $facadeTempFile) {
+    $request = Request::create('/download', 'GET');
+
+    $response = $manager->stream($facadeTempFile)
+        ->asAttachment('downloaded_lecture.mp4')
+        ->toResponse($request);
+
+    assertEqual(200, $response->getStatusCode());
+    assertTrue(str_starts_with((string) $response->headers->get('Content-Disposition'), 'attachment;'));
+    assertTrue(str_contains((string) $response->headers->get('Content-Disposition'), 'downloaded_lecture.mp4'));
+});
+
+if (file_exists($facadeTempFile)) {
+    unlink($facadeTempFile);
 }
 
 echo "\n-------------------------------------------------------\n";
