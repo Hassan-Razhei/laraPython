@@ -58,6 +58,7 @@ class PathSanitizer
 
         // 3. Normalize directory separators
         $normalized = str_replace('\\', '/', $decoded);
+        $isAbsolute = str_starts_with($normalized, '/');
 
         // 4. Split path into segments and validate
         $segments = explode('/', $normalized);
@@ -94,7 +95,8 @@ class PathSanitizer
             throw new PathTraversalException($path, 'Path cannot resolve to empty root.');
         }
 
-        return implode('/', $safeSegments);
+        $result = implode('/', $safeSegments);
+        return $isAbsolute ? '/' . $result : $result;
     }
 
     /**

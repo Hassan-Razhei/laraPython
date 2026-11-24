@@ -22,6 +22,7 @@ spl_autoload_register(function ($class) {
     }
 });
 
+use EntityStreamer\Contracts\CanStreamMedia;
 use EntityStreamer\Core\BinaryStreamer;
 use EntityStreamer\Core\ByteRange;
 use EntityStreamer\Core\RangeHeaderParser;
@@ -36,6 +37,7 @@ use EntityStreamer\Storage\StreamableFile;
 use EntityStreamer\Storage\StreamableStorageAdapter;
 use EntityStreamer\Support\MediaHeaderManager;
 use EntityStreamer\Support\MimeDetector;
+use EntityStreamer\Traits\HasStreamableMedia;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Symfony\Component\HttpFoundation\Request;
 
@@ -734,7 +736,7 @@ $sanitizer = new PathSanitizer();
 
 it('PathSanitizer: allows valid clean paths', function () use ($sanitizer) {
     assertEqual('videos/lecture1.mp4', $sanitizer->sanitize('videos/lecture1.mp4'));
-    assertEqual('audio/recitation.mp3', $sanitizer->sanitize('/audio/recitation.mp3'));
+    assertEqual('/audio/recitation.mp3', $sanitizer->sanitize('/audio/recitation.mp3'));
     assertEqual('deep/nested/storage/file.wav', $sanitizer->sanitize('deep//nested/storage/file.wav'));
     assertTrue($sanitizer->isSafe('videos/lecture.mp4'));
 });
@@ -879,6 +881,139 @@ it('StreamUrlSigner: validates directly from Symfony/Laravel Request', function 
     $request = Request::create($signedUrl, 'GET', $query);
     assertTrue($signer->validateRequest($request, $path));
 });
+
+// --- Level 6: Eloquent Models & HasStreamableMedia Tests ---
+echo "\n=======================================================\n";
+echo " 🚀 Running Level 6 Tests for entity-streamer (Eloquent Trait)\n";
+echo "=======================================================\n\n";
+
+class TestDummyVideoModel implements CanStreamMedia
+{
+    use HasStreamableMedia;
+
+    public function __construct(public array $attributes = [])
+    {
+    }
+
+    public function getAttribute(string $key): mixed
+    {
+        return $this->attributes[$key] ?? null;
+    }
+}
+
+class TestDummyMultiMediaModel implements CanStreamMedia
+{
+    use HasStreamableMedia;
+
+    protected array $streamableMedia = [
+        'default' => 'video_path',
+        'trailer' => 'trailer_path',
+        'audio'   => 'audio_path',
+    ];
+
+    public function __construct(public array $attributes = [])
+    {
+    }
+
+    public function getAttribute(string $key): mixed
+    {
+        return $this->attributes[$key] ?? null;
+    }
+}
+
+$eloquentTempFile = tempnam(sys_get_temp_dir(), 'eloquent_test_');
+$eloquentContent = str_repeat('Testing Eloquent Streaming Content! ', 300);
+file_put_contents($eloquentTempFile, $eloquentContent);
+
+it('HasStreamableMedia: discovers default media file column', function () use ($eloquentTempFile, $eloquentContent) {
+    $model = new TestDummyVideoModel(['file_path' => $eloquentTempFile]);
+
+    assertEqual($eloquentTempFile, $model->getStreamPath());
+    $file = $model->toStreamableFile();
+
+    assertTrue($file instanceof StreamableFile);
+    assertEqual(strlen($eloquentContent), $file->size);
+});
+
+it('HasStreamableMedia: multi-channel media mapping', function () use ($eloquentTempFile) {
+    $trailerFile = tempnam(sys_get_temp_dir(), 'trailer_test_');
+    file_put_contents($trailerFile, 'trailer audio');
+
+    $model = new TestDummyMultiMediaModel([
+        'video_path'   => $eloquentTempFile,
+        'trailer_path' => $trailerFile,
+    ]);
+
+    assertEqual($eloquentTempFile, $model->getStreamPath('default'));
+    assertEqual($trailerFile, $model->getStreamPath('trailer'));
+
+    unlink($trailerFile);
+});
+
+it('HasStreamableMedia: throws StreamResourceException when column is missing', function () {
+    $model = new TestDummyVideoModel(['title' => 'No media']);
+
+    $threw = false;
+    try {
+        $model->getStreamPath();
+    } catch (StreamResourceException $e) {
+        $threw = true;
+    }
+    assertTrue($threw);
+});
+
+it('HasStreamableMedia: blocks path traversal in model attributes', function () {
+    $model = new TestDummyVideoModel(['file_path' => '../passwords.txt']);
+
+    $threw = false;
+    try {
+        $model->toStreamableFile();
+    } catch (PathTraversalException $e) {
+        $threw = true;
+    }
+    assertTrue($threw);
+});
+
+it('HasStreamableMedia: generates signed streaming URL', function () {
+    $model = new TestDummyVideoModel(['file_path' => 'videos/lesson1.mp4']);
+    $url = $model->getStreamUrl(expiration: 3600);
+
+    assertTrue(str_contains($url, '/stream/videos/lesson1.mp4'));
+    assertTrue(str_contains($url, 'signature='));
+    assertTrue(str_contains($url, 'expires='));
+});
+
+it('HasStreamableMedia: streams RFC 7233 response directly from model', function () use ($eloquentTempFile) {
+    $model = new TestDummyVideoModel(['file_path' => $eloquentTempFile]);
+
+    $request = Request::create('/stream/video', 'GET', [], [], [], [
+        'HTTP_RANGE' => 'bytes=0-100',
+    ]);
+
+    $response = $model->streamResponse($request);
+
+    assertEqual(206, $response->getStatusCode());
+    assertEqual('bytes', $response->headers->get('Accept-Ranges'));
+    assertEqual('101', $response->headers->get('Content-Length'));
+    assertTrue(str_starts_with((string) $response->headers->get('Content-Range'), 'bytes 0-100/'));
+});
+
+it('HasStreamableMedia: returns 304 Not Modified from model when matching ETag', function () use ($eloquentTempFile) {
+    $model = new TestDummyVideoModel(['file_path' => $eloquentTempFile]);
+    $file = $model->toStreamableFile();
+    $etag = sprintf('W/"%x-%x"', $file->size, $file->lastModified);
+
+    $request = Request::create('/stream/video', 'GET', [], [], [], [
+        'HTTP_IF_NONE_MATCH' => $etag,
+    ]);
+
+    $response = $model->streamResponse($request);
+    assertEqual(304, $response->getStatusCode());
+});
+
+if (file_exists($eloquentTempFile)) {
+    unlink($eloquentTempFile);
+}
 
 echo "\n-------------------------------------------------------\n";
 echo "📊 Test Results: {$passed} Passed, {$failed} Failed\n";

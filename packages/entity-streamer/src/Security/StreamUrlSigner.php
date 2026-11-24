@@ -170,10 +170,16 @@ class StreamUrlSigner
 
     protected function resolveDefaultKey(): string
     {
-        if (function_exists('config')) {
-            $appKey = (string) config('app.key');
-            if ($appKey !== '') {
-                return $appKey;
+        if (function_exists('app') && function_exists('config')) {
+            try {
+                if (app()->bound('config')) {
+                    $appKey = (string) config('app.key');
+                    if ($appKey !== '') {
+                        return $appKey;
+                    }
+                }
+            } catch (\Throwable) {
+                // Container not yet booted
             }
         }
 

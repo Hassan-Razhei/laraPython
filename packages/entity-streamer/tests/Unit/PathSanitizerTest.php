@@ -21,7 +21,7 @@ class PathSanitizerTest extends TestCase
     public function test_allows_valid_clean_paths(): void
     {
         $this->assertSame('videos/lecture1.mp4', $this->sanitizer->sanitize('videos/lecture1.mp4'));
-        $this->assertSame('audio/recitation.mp3', $this->sanitizer->sanitize('/audio/recitation.mp3'));
+        $this->assertSame('/audio/recitation.mp3', $this->sanitizer->sanitize('/audio/recitation.mp3'));
         $this->assertSame('deep/nested/storage/manuscript.wav', $this->sanitizer->sanitize('deep//nested/storage/manuscript.wav'));
         $this->assertTrue($this->sanitizer->isSafe('videos/lecture.mp4'));
     }
