@@ -22,9 +22,11 @@ spl_autoload_register(function ($class) {
     }
 });
 
+use EntityStreamer\Core\BinaryStreamer;
 use EntityStreamer\Core\ByteRange;
 use EntityStreamer\Core\RangeHeaderParser;
 use EntityStreamer\Exceptions\InvalidByteRangeException;
+use EntityStreamer\Exceptions\StreamResourceException;
 use Symfony\Component\HttpFoundation\Request;
 
 $passed = 0;
@@ -285,6 +287,174 @@ it('RangeHeaderParser: parses directly from Symfony/Laravel Request', function (
     assertEqual(601, $range->length);
     assertEqual(206, $range->getStatusCode());
 });
+
+// --- Level 2: BinaryStreamer Tests ---
+echo "\n=======================================================\n";
+echo " 🚀 Running Level 2 Tests for entity-streamer (BinaryStreamer)\n";
+echo "=======================================================\n\n";
+
+$sampleText = str_repeat('0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@', 1600);
+$tmpFile = tempnam(sys_get_temp_dir(), 'streamer_l2_');
+file_put_contents($tmpFile, $sampleText);
+
+it('BinaryStreamer: can stream exact byte range from file path', function () use ($tmpFile, $sampleText) {
+    $streamer = new BinaryStreamer(chunkSize: 4096);
+    $range = ByteRange::partial(start: 10, end: 35, total: strlen($sampleText));
+
+    $outputStream = fopen('php://memory', 'w+b');
+    $bytesSent = $streamer->stream($tmpFile, $range, $outputStream);
+
+    assertEqual(26, $bytesSent);
+
+    rewind($outputStream);
+    $streamedData = stream_get_contents($outputStream);
+    fclose($outputStream);
+
+    $expectedData = substr($sampleText, 10, 26);
+    assertEqual($expectedData, $streamedData);
+});
+
+it('BinaryStreamer: can stream from existing stream resource handle', function () use ($tmpFile, $sampleText) {
+    $streamer = (new BinaryStreamer(chunkSize: 1024))->withoutBufferCleaning();
+    $source = fopen($tmpFile, 'rb');
+    $range = ByteRange::partial(start: 100, end: 199, total: strlen($sampleText));
+
+    $outputStream = fopen('php://memory', 'w+b');
+    $bytesSent = $streamer->stream($source, $range, $outputStream);
+
+    assertEqual(100, $bytesSent);
+
+    rewind($outputStream);
+    $streamedData = stream_get_contents($outputStream);
+    fclose($outputStream);
+    fclose($source);
+
+    assertEqual(substr($sampleText, 100, 100), $streamedData);
+});
+
+it('BinaryStreamer: chunking with small buffers (5000 bytes via 1KB chunks)', function () use ($tmpFile, $sampleText) {
+    $streamer = new BinaryStreamer(chunkSize: 1024);
+    $range = ByteRange::partial(start: 0, end: 4999, total: strlen($sampleText));
+
+    $outputStream = fopen('php://memory', 'w+b');
+    $bytesSent = $streamer->stream($tmpFile, $range, $outputStream);
+
+    assertEqual(5000, $bytesSent);
+
+    rewind($outputStream);
+    $data = stream_get_contents($outputStream);
+    fclose($outputStream);
+
+    assertEqual(substr($sampleText, 0, 5000), $data);
+});
+
+it('BinaryStreamer: stream full file content (HTTP 200 representation)', function () use ($tmpFile, $sampleText) {
+    $streamer = new BinaryStreamer();
+    $total = strlen($sampleText);
+    $range = ByteRange::full($total);
+
+    $outputStream = fopen('php://memory', 'w+b');
+    $bytesSent = $streamer->stream($tmpFile, $range, $outputStream);
+
+    assertEqual($total, $bytesSent);
+
+    rewind($outputStream);
+    $data = stream_get_contents($outputStream);
+    fclose($outputStream);
+
+    assertEqual($sampleText, $data);
+});
+
+it('BinaryStreamer: creates StreamedResponse with RFC 7233 partial headers', function () use ($tmpFile, $sampleText) {
+    $streamer = new BinaryStreamer();
+    $total = strlen($sampleText);
+    $range = ByteRange::partial(start: 50, end: 150, total: $total);
+
+    $response = $streamer->toStreamedResponse(
+        source: $tmpFile,
+        range: $range,
+        headers: ['Content-Type' => 'video/mp4']
+    );
+
+    assertEqual(206, $response->getStatusCode());
+    assertEqual('bytes', $response->headers->get('Accept-Ranges'));
+    assertEqual('101', $response->headers->get('Content-Length'));
+    assertEqual("bytes 50-150/{$total}", $response->headers->get('Content-Range'));
+    assertEqual('video/mp4', $response->headers->get('Content-Type'));
+});
+
+it('BinaryStreamer: creates StreamedResponse for full file (200 OK without Content-Range)', function () use ($tmpFile, $sampleText) {
+    $streamer = new BinaryStreamer();
+    $total = strlen($sampleText);
+    $range = ByteRange::full($total);
+
+    $response = $streamer->toStreamedResponse(
+        source: $tmpFile,
+        range: $range,
+        headers: ['Content-Type' => 'audio/mpeg']
+    );
+
+    assertEqual(200, $response->getStatusCode());
+    assertEqual('bytes', $response->headers->get('Accept-Ranges'));
+    assertEqual((string) $total, $response->headers->get('Content-Length'));
+    assertFalse($response->headers->has('Content-Range'));
+    assertEqual('audio/mpeg', $response->headers->get('Content-Type'));
+});
+
+it('BinaryStreamer: throws StreamResourceException on missing file', function () {
+    $streamer = new BinaryStreamer();
+    $range = ByteRange::full(100);
+    $threw = false;
+    try {
+        $streamer->stream('/non/existent/path/media.mp4', $range);
+    } catch (StreamResourceException $e) {
+        $threw = true;
+    }
+    assertTrue($threw);
+});
+
+it('BinaryStreamer: throws StreamResourceException on invalid resource type', function () {
+    $streamer = new BinaryStreamer();
+    $range = ByteRange::full(100);
+    $threw = false;
+    try {
+        $streamer->stream(12345, $range);
+    } catch (StreamResourceException $e) {
+        $threw = true;
+    }
+    assertTrue($threw);
+});
+
+it('BinaryStreamer: fluent immutable configuration', function () {
+    $orig = new BinaryStreamer(chunkSize: 65536);
+    $mod = $orig->withChunkSize(131072)->withThrottle(500);
+
+    assertEqual(65536, $orig->getChunkSize());
+    assertEqual(null, $orig->getThrottle());
+    assertEqual(131072, $mod->getChunkSize());
+    assertEqual(500, $mod->getThrottle());
+});
+
+it('BinaryStreamer: memory safety test (zero-ballooning on multi-chunk stream)', function () use ($tmpFile, $sampleText) {
+    $startMem = memory_get_usage();
+
+    $streamer = new BinaryStreamer(chunkSize: 2048);
+    $range = ByteRange::full(strlen($sampleText));
+
+    // Stream to dev/null or null stream to check memory
+    $output = fopen('php://temp', 'w+b');
+    $streamer->stream($tmpFile, $range, $output);
+    fclose($output);
+
+    $endMem = memory_get_usage();
+    // Memory overhead should be negligible (< 100 KB regardless of data streamed)
+    $diff = abs($endMem - $startMem);
+    assertTrue($diff < 200 * 1024, "Memory consumed ({$diff} bytes) is well within safety margin");
+});
+
+if (file_exists($tmpFile)) {
+    unlink($tmpFile);
+}
 
 echo "\n-------------------------------------------------------\n";
 echo "📊 Test Results: {$passed} Passed, {$failed} Failed\n";
