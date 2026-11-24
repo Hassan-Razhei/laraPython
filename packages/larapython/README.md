@@ -14,7 +14,7 @@
 ## التثبيت
 
 ```bash
-composer require entity/larapython
+composer require hassan-razhei/larapython
 ```
 
 نشر الإعدادات والأصول:

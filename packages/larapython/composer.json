@@ -1,5 +1,5 @@
 {
-    "name": "entity/larapython",
+    "name": "hassan-razhei/larapython",
     "description": "Unified Laravel-Python Integration Engine for background tasks, Boost MCP, and microservices.",
     "type": "library",
     "license": "MIT",
