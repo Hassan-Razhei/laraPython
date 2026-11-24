@@ -3,6 +3,17 @@
     "description": "High-performance RFC 7233 partial content HTTP 206 video and audio streaming engine for Laravel.",
     "type": "library",
     "license": "MIT",
+    "keywords": [
+        "laravel",
+        "streaming",
+        "rfc-7233",
+        "http-206",
+        "partial-content",
+        "video-streaming",
+        "audio-streaming",
+        "flysystem",
+        "signed-urls"
+    ],
     "authors": [
         {
             "name": "Hassan-Razhei",
@@ -39,4 +50,3 @@
     "minimum-stability": "dev",
     "prefer-stable": true
 }
-
